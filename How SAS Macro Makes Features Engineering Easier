@@ -1,0 +1,121 @@
+/*  1 Macro Hot Encoding  */
+
+option mprint mlogic;
+%macro hot_encode(data,var);
+proc sql;
+select distinct &var 
+	into:val1-
+from &data;
+select count(distinct(&var))
+	into:len
+from &data;
+quit;
+run;
+data encoded_data;
+set &data;
+%do i=1 %to &len;
+	if &var="&&&val&i" then %sysfunc(compress(&&&val&i,'$ - /'))=1 ;
+	else  %sysfunc(compress(&&&val&i,'$ - /'))=0;
+%end;
+run;
+%mend;
+option nomprint nomlogic no;
+
+/*  Example of Hot Encoding  */
+option mprint mlogic SYMBOLGEN;
+%hot_encode(sashelp.cars, Make)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/* 2 Describe Table/Data  */
+%macro table_info(dsn);
+
+proc contents data=&dsn;
+run;
+
+proc means data=&dsn;
+var _numeric_;
+run;
+
+proc freq data=&dsn;
+table _character_ / plots=freqplot();
+run;
+
+%mend;
+
+
+/*  Example of Describe Table  */
+%table_info(sashelp.cars)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/* 3 Macro Outlier Detection  */
+%macro outliers(dat,var);
+options nonotes;
+proc univariate data=&dat normal noprint;
+var &var;
+output out=ttest normaltest=Test probn=P_Value;
+run;
+Data _Null_;
+set ttest;
+%if P_value > 0.05 %Then %do;
+  option notes;
+  %put NOTE: &var is normally distributed hence it select STD method to find Outliers.;
+  %put NOTE: You can check statistics and pvalue in work.ttest table;
+  options nonotes;
+  Proc SQL noprint;
+  Select Mean(&var)
+    into: me
+  from &dat;
+  select std(&var)
+    into:sd
+  from &dat;
+  quit;
+  run;
+  Data outlier;
+  set &dat;
+  %Let Min_cutoff= %sysevalf(&me - (3* &sd));
+  %Let Max_cutoff= %sysevalf(&me + (3* &sd));
+  where &var < &Min_cutoff or &var > &Max_cutoff;
+  run;
+%end;
+%else %do;
+  options notes;
+  %put NOTE: &var is not normally distributed hence it select percentile method to find Outliers.;
+  %put NOTE: You can check statistics and pvalue in work.ttest table & percentile values in work.ranges table;
+  options nonotes;
+  proc means data=&dat stackods n qrange p1 p99 ;
+  var  &var;
+  ods output summary=ranges;
+  run;
+  proc sql noprint;
+  select P1 into:Min 
+  from ranges;
+  select P99 into : Max
+  from Ranges;
+  quit;
+  run;
+  Data outliers;
+  set &dat;
+  Where &var < &Min or &var > &Max;
+  run;
+%end;
+  options notes;
+%mend;
+
+/*  Example of Outlier Detection */
+%outliers(wine,Color_Intensity)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/* 4 Macro Lag Features */
+
+%macro lag_n(da,var,d1,d2);
+data withlag;
+set &da ;
+%do i= &d1 %to &d2;
+ Lag_&i = LAG&i(MSRP);
+%end;
+run;
+%mend;
+
+/*  Example of Lag Features */
+options symbolgen mlogic mprint;
+%lag_n(sashelp.cars,MSRP,1,3)
